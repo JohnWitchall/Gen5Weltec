@@ -1,0 +1,134 @@
+//radio
+#include <RadioHead.h>
+#include <SPI.h>
+#include <RH_ABZ.h>
+#include <stdlib.h>
+
+//bmp280 Air pressure
+#include "Seeed_BMP280.h"
+#include <Wire.h>
+BMP280 bmp280;
+
+#define GREEN_LED 13
+#define YELLOW_LED 12
+#define RED_LED 11
+
+//globalvariables
+RH_ABZ abz;
+float pa;
+float temp;
+
+#if defined(ARDUINO_ARCH_AVR)
+    #define debug  Serial
+ 
+#elif defined(ARDUINO_ARCH_SAMD) ||  defined(ARDUINO_ARCH_SAM)
+    #define debug  SerialUSB
+#else
+    #define debug  Serial
+#endif
+
+void setupradio() 
+{
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(YELLOW_LED, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+  
+  Serial.begin(9600);
+  SX1276SetBoardTcxo(true);
+  delay(1);
+                                     
+  if (!abz.init())
+    Serial.println("init failed");
+  // Defaults after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on
+ 
+  abz.setFrequency(868.0);
+ 
+  // You can change the modulation speed etc from the default
+  //abz.setModemConfig(RH_RF95::Bw125Cr45Sf128);
+  //abz.setModemConfig(RH_RF95::Bw125Cr45Sf2048);
+  
+  // The default transmitter power is 13dBm, using PA_BOOST.
+  // You can set transmitter powers from 2 to 20 dBm:
+  //abz.setTxPower(20); // Max power
+}
+ void setupBMP() {
+  if(!bmp280.init()){
+    Serial.println("Device error!");
+  }
+}
+
+void loopBMP() {
+  temp=bmp280.getTemperature();
+  pa=bmp280.getPressure();
+  delay(1000);
+}
+
+//Function to convert float to string
+char *dtostrf (double val, signed char width, unsigned char prec, char *sout) {
+  char fmt[20];
+  sprintf(fmt, "%%%d.%df", width, prec);
+  sprintf(sout, fmt, val);
+  return sout;
+}
+
+void loopradio()
+{
+  digitalWrite(YELLOW_LED, 1);
+  digitalWrite(GREEN_LED, 0);
+  digitalWrite(RED_LED, 0);
+  debug.print(temp);
+
+  char bufferTemp[5]; //reserve 5 spaces
+  
+  dtostrf(temp, -5, 2, bufferTemp); //float, min width, buffer is looking for the start of the memory buffer
+
+
+  // Send a message to abz_server
+  uint8_t *data = (uint8_t *)bufferTemp;//Casting uint8_t (forcing it to be a uint_8)    //variable data, which points to the memory address of buffer points to the 1st one in buffer
+  for(int i=0;i<5;i++){
+   debug.println(data[i]);
+  }
+
+  abz.send(data, 5);
+  abz.waitPacketSent();
+  debug.println((char*)data);
+
+  uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+  uint8_t len = sizeof(buf);
+ 
+  if (abz.waitAvailableTimeout(3000))
+  { 
+
+    if (abz.recv(buf, &len))
+   {
+      Serial.print("got reply: ");
+      Serial.println((char*)buf); 
+      digitalWrite(GREEN_LED, 1);
+ 
+    }
+    else
+    {
+      Serial.println("recv failed");  
+      digitalWrite(RED_LED, 1);
+ 
+    }
+  }
+  else
+  {
+    Serial.println("No reply, is abz_server running?");
+      digitalWrite(RED_LED, 1);
+  }
+  digitalWrite(YELLOW_LED, 0);
+ 
+  delay(400);
+}
+
+void setup() {
+  setupradio();
+  setupBMP();
+}
+
+void loop() {
+  loopradio();
+  loopBMP();
+} 
